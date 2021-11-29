@@ -21,7 +21,6 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"sync"
 )
 
 type ChunkerOpts struct {
@@ -31,9 +30,8 @@ type ChunkerOpts struct {
 }
 
 type Chunker struct {
-	rd      *bufio.Reader
-	buffer  bytes.Buffer
-	bufpool sync.Pool
+	rd     *bufio.Reader
+	buffer bytes.Buffer
 
 	offset uint64
 
@@ -87,30 +85,20 @@ func NewChunker(reader io.Reader, options *ChunkerOpts) (*Chunker, error) {
 		chunker.MaxSize = options.MaxSize
 	}
 
-	chunker.bufpool = sync.Pool{
-		New: func() interface{} {
-			b := make([]byte, chunker.MaxSize)
-			return &b
-		},
-	}
-
 	return chunker, nil
 }
 
-func (chunker *Chunker) Next() (*Chunk, error) {
+func (chunker *Chunker) Next(buf []byte) (*Chunk, error) {
 	if chunker.rd != nil {
 		if chunker.buffer.Len() < int(chunker.MaxSize) {
-			rdBuf := chunker.bufpool.Get().(*[]byte)
-			n, err := chunker.rd.Read(*rdBuf)
+			n, err := chunker.rd.Read(buf)
 			if err != nil {
-				chunker.bufpool.Put(rdBuf)
 				if err != io.EOF {
 					return nil, err
 				}
 				chunker.rd = nil
 			} else {
-				chunker.buffer.Write((*rdBuf)[:n])
-				chunker.bufpool.Put(rdBuf)
+				chunker.buffer.Write(buf[:n])
 			}
 		}
 	}
