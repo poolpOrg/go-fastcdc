@@ -98,37 +98,39 @@ func NewChunker(reader io.Reader, options *ChunkerOpts) (*Chunker, error) {
 	chunker.prefetch_buffer = make([]byte, chunker.MaxSize)
 
 	go func() {
-		if !chunker.rdEOF {
-			if chunker.buffer.Len() < int(chunker.MaxSize) {
-				n, err := chunker.rd.Read(chunker.prefetch_buffer)
-				if err != nil {
-					if err != io.EOF {
-						chunker.prefetch <- &prefetch{nil, err}
-						return
+		for {
+			if !chunker.rdEOF {
+				if chunker.buffer.Len() < int(chunker.MaxSize) {
+					n, err := chunker.rd.Read(chunker.prefetch_buffer)
+					if err != nil {
+						if err != io.EOF {
+							chunker.prefetch <- &prefetch{nil, err}
+							return
+						}
+						chunker.rdEOF = true
+					} else {
+						chunker.buffer.Write(chunker.prefetch_buffer[:n])
 					}
-					chunker.rdEOF = true
-				} else {
-					chunker.buffer.Write(chunker.prefetch_buffer[:n])
 				}
 			}
+
+			if chunker.buffer.Len() == 0 {
+				chunker.prefetch <- &prefetch{nil, io.EOF}
+				return
+			}
+
+			chunkLength := chunker.fastCDC(&chunker.buffer, uint32(chunker.buffer.Len()))
+
+			offset := chunker.offset
+			chunker.offset += uint64(chunkLength)
+
+			chunker.prefetch <- &prefetch{
+				&Chunk{
+					Offset: offset,
+					Size:   chunkLength,
+					Data:   chunker.buffer.Next(int(chunkLength)),
+				}, nil}
 		}
-
-		if chunker.buffer.Len() == 0 {
-			chunker.prefetch <- &prefetch{nil, io.EOF}
-			return
-		}
-
-		chunkLength := chunker.fastCDC(&chunker.buffer, uint32(chunker.buffer.Len()))
-
-		offset := chunker.offset
-		chunker.offset += uint64(chunkLength)
-
-		chunker.prefetch <- &prefetch{
-			&Chunk{
-				Offset: offset,
-				Size:   chunkLength,
-				Data:   chunker.buffer.Next(int(chunkLength)),
-			}, nil}
 	}()
 
 	return chunker, nil
