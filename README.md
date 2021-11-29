@@ -6,7 +6,7 @@ This is a work in progress.
 
 ```go
     chunkerOpts := fastcdc.ChunkerOpts{
-        NormalSize : 8 * 1024 * 1024,   // 8KB
+        NormalSize : 8 * 1024,   // 8KB
     }
 
     chunker, err := fastcdc.NewChunker(rd, &chunkerOpts)
