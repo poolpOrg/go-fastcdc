@@ -22,6 +22,11 @@ import (
 	"io"
 )
 
+type prefetch struct {
+	chunk *Chunk
+	err   error
+}
+
 type ChunkerOpts struct {
 	NormalSize uint32
 	MinSize    uint32
@@ -32,6 +37,9 @@ type Chunker struct {
 	rd     io.Reader
 	rdEOF  bool
 	buffer bytes.Buffer
+
+	prefetch        chan *prefetch
+	prefetch_buffer []byte
 
 	offset uint64
 
@@ -86,38 +94,49 @@ func NewChunker(reader io.Reader, options *ChunkerOpts) (*Chunker, error) {
 		chunker.MaxSize = options.MaxSize
 	}
 
+	chunker.prefetch = make(chan *prefetch, 1)
+	chunker.prefetch_buffer = make([]byte, chunker.MaxSize)
+
+	go func() {
+		if !chunker.rdEOF {
+			if chunker.buffer.Len() < int(chunker.MaxSize) {
+				n, err := chunker.rd.Read(chunker.prefetch_buffer)
+				if err != nil {
+					if err != io.EOF {
+						chunker.prefetch <- &prefetch{nil, err}
+						return
+					}
+					chunker.rdEOF = true
+				} else {
+					chunker.buffer.Write(chunker.prefetch_buffer[:n])
+				}
+			}
+		}
+
+		if chunker.buffer.Len() == 0 {
+			chunker.prefetch <- &prefetch{nil, io.EOF}
+			return
+		}
+
+		chunkLength := chunker.fastCDC(&chunker.buffer, uint32(chunker.buffer.Len()))
+
+		offset := chunker.offset
+		chunker.offset += uint64(chunkLength)
+
+		chunker.prefetch <- &prefetch{
+			&Chunk{
+				Offset: offset,
+				Size:   chunkLength,
+				Data:   chunker.buffer.Next(int(chunkLength)),
+			}, nil}
+	}()
+
 	return chunker, nil
 }
 
 func (chunker *Chunker) Next(buf []byte) (*Chunk, error) {
-	if !chunker.rdEOF {
-		if chunker.buffer.Len() < int(chunker.MaxSize) {
-			n, err := chunker.rd.Read(buf)
-			if err != nil {
-				if err != io.EOF {
-					return nil, err
-				}
-				chunker.rdEOF = true
-			} else {
-				chunker.buffer.Write(buf[:n])
-			}
-		}
-	}
-
-	if chunker.buffer.Len() == 0 {
-		return nil, io.EOF
-	}
-
-	chunkLength := chunker.fastCDC(&chunker.buffer, uint32(chunker.buffer.Len()))
-
-	offset := chunker.offset
-	chunker.offset += uint64(chunkLength)
-
-	return &Chunk{
-		Offset: offset,
-		Size:   chunkLength,
-		Data:   chunker.buffer.Next(int(chunkLength)),
-	}, nil
+	prefetch := <-chunker.prefetch
+	return prefetch.chunk, prefetch.err
 }
 
 func (chunker *Chunker) fastCDC(src *bytes.Buffer, n uint32) uint32 {
