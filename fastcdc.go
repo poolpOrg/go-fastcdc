@@ -121,19 +121,13 @@ func (chunker *Chunker) Next() (*Chunk, error) {
 
 	chunkLength := chunker.fastCDC(&chunker.buffer, uint32(chunker.buffer.Len()))
 
-	var chunkData []byte = make([]byte, chunkLength)
-	_, err := chunker.buffer.Read(chunkData)
-	if err != nil {
-		return nil, err
-	}
-
 	offset := chunker.offset
 	chunker.offset += uint64(chunkLength)
 
 	return &Chunk{
 		Offset: offset,
 		Size:   chunkLength,
-		Data:   chunkData,
+		Data:   chunker.buffer.Next(int(chunkLength)),
 	}, nil
 }
 
