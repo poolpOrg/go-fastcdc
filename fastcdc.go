@@ -17,7 +17,6 @@
 package fastcdc
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
 	"io"
@@ -30,7 +29,8 @@ type ChunkerOpts struct {
 }
 
 type Chunker struct {
-	rd     *bufio.Reader
+	rd     io.Reader
+	rdEOF  bool
 	buffer bytes.Buffer
 
 	offset uint64
@@ -73,7 +73,8 @@ func NewChunker(reader io.Reader, options *ChunkerOpts) (*Chunker, error) {
 
 	chunker := &Chunker{}
 	chunker.offset = 0
-	chunker.rd = bufio.NewReader(reader)
+	chunker.rd = reader
+	chunker.rdEOF = false
 
 	if options == nil {
 		chunker.NormalSize = 8 * 1024
@@ -89,14 +90,14 @@ func NewChunker(reader io.Reader, options *ChunkerOpts) (*Chunker, error) {
 }
 
 func (chunker *Chunker) Next(buf []byte) (*Chunk, error) {
-	if chunker.rd != nil {
+	if !chunker.rdEOF {
 		if chunker.buffer.Len() < int(chunker.MaxSize) {
 			n, err := chunker.rd.Read(buf)
 			if err != nil {
 				if err != io.EOF {
 					return nil, err
 				}
-				chunker.rd = nil
+				chunker.rdEOF = true
 			} else {
 				chunker.buffer.Write(buf[:n])
 			}
