@@ -31,6 +31,9 @@ type ChunkerOpts struct {
 	NormalSize uint32
 	MinSize    uint32
 	MaxSize    uint32
+
+	BufferAllocate func() *[]byte
+	BufferRelease  func(*[]byte)
 }
 
 type Chunker struct {
@@ -46,12 +49,23 @@ type Chunker struct {
 	NormalSize uint32
 	MinSize    uint32
 	MaxSize    uint32
+
+	bufferAllocate func() *[]byte
+	bufferRelease  func(*[]byte)
 }
 
 type Chunk struct {
 	Offset uint64
 	Size   uint32
 	Data   []byte
+}
+
+func NewChunkerOptions() *ChunkerOpts {
+	return &ChunkerOpts{
+		NormalSize:     1 * 1024 * 1024,
+		BufferAllocate: nil,
+		BufferRelease:  nil,
+	}
 }
 
 func NewChunker(reader io.Reader, options *ChunkerOpts) (*Chunker, error) {
@@ -94,22 +108,42 @@ func NewChunker(reader io.Reader, options *ChunkerOpts) (*Chunker, error) {
 		chunker.MaxSize = options.MaxSize
 	}
 
-	chunker.prefetch = make(chan *prefetch, 1)
+	if options != nil {
+		chunker.bufferAllocate = options.BufferAllocate
+	}
+	if chunker.bufferAllocate == nil {
+		buffer := make([]byte, chunker.MaxSize)
+		chunker.bufferAllocate = func() *[]byte {
+			return &buffer
+		}
+	}
+
+	if options != nil {
+		chunker.bufferRelease = options.BufferRelease
+	}
+	if chunker.bufferRelease == nil {
+		chunker.bufferRelease = func(*[]byte) {}
+	}
+
+	chunker.prefetch = make(chan *prefetch, 2)
 	chunker.prefetch_buffer = make([]byte, chunker.MaxSize)
 
 	go func() {
 		for {
 			if !chunker.rdEOF {
 				if chunker.buffer.Len() < int(chunker.MaxSize) {
-					n, err := chunker.rd.Read(chunker.prefetch_buffer)
+					buffer := chunker.bufferAllocate()
+					n, err := chunker.rd.Read(*buffer)
 					if err != nil {
+						chunker.bufferRelease(buffer)
 						if err != io.EOF {
 							chunker.prefetch <- &prefetch{nil, err}
 							return
 						}
 						chunker.rdEOF = true
 					} else {
-						chunker.buffer.Write(chunker.prefetch_buffer[:n])
+						chunker.buffer.Write((*buffer)[:n])
+						chunker.bufferRelease(buffer)
 					}
 				}
 			}
@@ -136,7 +170,7 @@ func NewChunker(reader io.Reader, options *ChunkerOpts) (*Chunker, error) {
 	return chunker, nil
 }
 
-func (chunker *Chunker) Next(buf []byte) (*Chunk, error) {
+func (chunker *Chunker) Next() (*Chunk, error) {
 	prefetch := <-chunker.prefetch
 	return prefetch.chunk, prefetch.err
 }
