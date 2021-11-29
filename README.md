@@ -5,11 +5,10 @@ go-fastcdc is a Golang package implementing the fastCDC chunking algorithm.
 This is a work in progress.
 
 ```go
-    chunkerOpts := fastcdc.ChunkerOpts{
-        NormalSize : 8 * 1024,   // 8KB
-    }
+    chunkerOpts := fastcdc.NewChunkerOpts()
+    chunkerOpts.NormalSize = 8 * 1024,   // 8KB
 
-    chunker, err := fastcdc.NewChunker(rd, &chunkerOpts)
+    chunker, err := fastcdc.NewChunker(rd, chunkerOpts)
     if err != nil {
         log.Fatal(err)
     }
