@@ -49,9 +49,6 @@ type Chunker struct {
 	NormalSize uint32
 	MinSize    uint32
 	MaxSize    uint32
-
-	bufferAllocate func() *[]byte
-	bufferRelease  func(*[]byte)
 }
 
 type Chunk struct {
@@ -108,23 +105,6 @@ func NewChunker(reader io.Reader, options *ChunkerOpts) (*Chunker, error) {
 		chunker.MaxSize = options.MaxSize
 	}
 
-	if options != nil {
-		chunker.bufferAllocate = options.BufferAllocate
-	}
-	if chunker.bufferAllocate == nil {
-		buffer := make([]byte, chunker.MaxSize)
-		chunker.bufferAllocate = func() *[]byte {
-			return &buffer
-		}
-	}
-
-	if options != nil {
-		chunker.bufferRelease = options.BufferRelease
-	}
-	if chunker.bufferRelease == nil {
-		chunker.bufferRelease = func(*[]byte) {}
-	}
-
 	chunker.prefetch = make(chan *prefetch, 2)
 	chunker.prefetch_buffer = make([]byte, chunker.MaxSize)
 
@@ -132,18 +112,15 @@ func NewChunker(reader io.Reader, options *ChunkerOpts) (*Chunker, error) {
 		for {
 			if !chunker.rdEOF {
 				if chunker.buffer.Len() < int(chunker.MaxSize) {
-					buffer := chunker.bufferAllocate()
-					n, err := chunker.rd.Read(*buffer)
+					n, err := chunker.rd.Read(chunker.prefetch_buffer)
 					if err != nil {
-						chunker.bufferRelease(buffer)
 						if err != io.EOF {
 							chunker.prefetch <- &prefetch{nil, err}
 							return
 						}
 						chunker.rdEOF = true
 					} else {
-						chunker.buffer.Write((*buffer)[:n])
-						chunker.bufferRelease(buffer)
+						chunker.buffer.Write(chunker.prefetch_buffer[:n])
 					}
 				}
 			}
@@ -162,7 +139,7 @@ func NewChunker(reader io.Reader, options *ChunkerOpts) (*Chunker, error) {
 				&Chunk{
 					Offset: offset,
 					Size:   chunkLength,
-					Data:   chunker.buffer.Next(int(chunkLength)),
+					Data:   chunker.buffer.Next(int(chunkLength))[:],
 				}, nil}
 		}
 	}()
