@@ -139,7 +139,7 @@ func NewChunker(reader io.Reader, options *ChunkerOpts) (*Chunker, error) {
 				&Chunk{
 					Offset: offset,
 					Size:   chunkLength,
-					Data:   chunker.buffer.Next(int(chunkLength))[:],
+					Data:   append([]byte(nil), chunker.buffer.Next(int(chunkLength))...),
 				}, nil}
 		}
 	}()
